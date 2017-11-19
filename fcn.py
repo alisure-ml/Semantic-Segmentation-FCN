@@ -107,8 +107,8 @@ class Data:
         self._read_images()
 
     def _read_images(self):
-        self.images = np.array([self._transform(filename['image'], isImage=True) for filename in self.files[0: 100]])
-        self.annotations = np.array([np.expand_dims(self._transform(filename['annotation'], isImage=False), axis=3) for filename in self.files[0: 100]])
+        self.images = np.array([self._transform(filename['image'], isImage=True) for filename in self.files])
+        self.annotations = np.array([np.expand_dims(self._transform(filename['annotation'], isImage=False), axis=3) for filename in self.files])
         pass
 
     def _transform(self, filename, isImage):
@@ -251,17 +251,16 @@ class FCN_VGGNet:
             conv_t3 = tf.nn.bias_add(tf.nn.conv2d_transpose(fuse_2, W_t3, deconv_shape3, strides=[1, 8, 8, 1], padding="SAME"), b_t3)
 
             logits = conv_t3
-            softmax = tf.nn.softmax(logits=logits, name="softmax")
             prediction = tf.expand_dims(tf.argmax(logits, dimension=3, name="prediction"), dim=3)
 
-        return logits, softmax, prediction
+        return logits, prediction
 
     pass
 
 
 class Runner:
 
-    def __init__(self, train_data, valid_data, fcn_net, model_path, learning_rate=0.0001, **kw):
+    def __init__(self, train_data, valid_data, fcn_net, model_path, learning_rate, **kw):
         self._train_data = train_data
         self._valid_data = valid_data
         self._type_number = self._train_data.type_number
@@ -276,22 +275,30 @@ class Runner:
         # 输入
         self.image, self.label = None, None
         # 网络输出
-        self.logits, self.softmax, self.prediction = None, None, None
+        self.logits, self.prediction = None, None
         # 损失和训练
         self.loss, self.train_op = None, None
+
         with self.graph.as_default():
             input_shape = [self._batch_size, self._image_size, self._image_size, self._image_channel]
             self.image = tf.placeholder(shape=input_shape, dtype=tf.float32)
             self.label = tf.placeholder(dtype=tf.int32, shape=[self._batch_size, self._image_size, self._image_size, 1])
-
-            self.logits, self.softmax, self.prediction = self._fcn_net(self.image, **kw)
-            entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.label, logits=self.logits)
+            self.logits, self.prediction = self._fcn_net(self.image, **kw)
+            entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tf.squeeze(self.label, squeeze_dims=[3]), logits=self.logits)
             self.loss = tf.reduce_mean(entropy)
-            self.train_op = tf.train.AdamOptimizer(learning_rate=self._learning_rate, beta1=0.5).minimize(self.loss)
+
+            trainable_var = tf.trainable_variables()
+            self.train_op = self._train_op(self.loss, trainable_var)
             pass
         self.supervisor = tf.train.Supervisor(graph=self.graph, logdir=self._model_path)
         self.config = tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True))
         pass
+
+    # train op
+    def _train_op(self, loss_val, var_list):
+        optimizer = tf.train.AdamOptimizer(self._learning_rate)
+        grads = optimizer.compute_gradients(loss_val, var_list=var_list)
+        return optimizer.apply_gradients(grads)
 
     # 训练网络
     def train(self, epochs, save_model, min_loss, print_loss, test, test_number, save, result_path):
@@ -302,9 +309,8 @@ class Runner:
                 if self.supervisor.should_stop():
                     break
                 # train
-                images, labels = self._train_data.next_batch()
-                loss, _, softmax = sess.run(fetches=[self.loss, self.train_op, self.softmax],
-                                            feed_dict={self.image: images, self.label: labels})
+                x, labels = self._train_data.next_batch()
+                loss, _ = sess.run(fetches=[self.loss, self.train_op], feed_dict={self.image: x, self.label: labels})
                 if epoch % print_loss == 0:
                     Tools.print_info("{}: loss {}".format(epoch, loss))
                 if loss < min_loss:
@@ -345,20 +351,23 @@ class Runner:
 
 if __name__ == '__main__':
 
+    # argument
     parser = argparse.ArgumentParser()
     parser.add_argument("-name", type=str, default="fcn_vgg_16", help="name")
     parser.add_argument("-epochs", type=int, default=50000, help="train epoch number")
-    parser.add_argument("-batch_size", type=int, default=32, help="batch size")
-    parser.add_argument("-type_number", type=int, default=45, help="type number")
-    parser.add_argument("-image_size", type=int, default=256, help="image size")
+    parser.add_argument("-batch_size", type=int, default=4, help="batch size")
+    parser.add_argument("-type_number", type=int, default=151, help="type number")
+    parser.add_argument("-image_size", type=int, default=224, help="image size")
     parser.add_argument("-image_channel", type=int, default=3, help="image channel")
     parser.add_argument("-keep_prob", type=float, default=0.7, help="keep prob")
     args = parser.parse_args()
 
+    # print argument
     output_param = "name={},epochs={},batch_size={},type_num={},size={},channel={},keep_prob={}"
     Tools.print_info(output_param.format(args.name, args.epochs, args.batch_size, args.type_number,
                                          args.image_size, args.image_channel, args.keep_prob))
 
+    # data
     data_path = PreData.main()
     train_records, valid_records = Data.read_scene_image(data_path)
     image_options = {'resize': True, 'resize_size': args.image_size}
@@ -368,8 +377,11 @@ if __name__ == '__main__':
     now_valid_data = Data(batch_size=args.batch_size, type_number=args.type_number,
                           image_size=args.image_size, image_channel=args.image_channel,
                           records_list=valid_records, image_options=image_options)
+
+    # net
     now_net = FCN_VGGNet(args.type_number, args.image_size, args.image_channel, args.batch_size)
 
+    # run
     runner = Runner(train_data=now_train_data, valid_data=now_valid_data, fcn_net=now_net.vgg_16,
                     model_path="model/{}".format(args.name), learning_rate=0.0001, keep_prob=args.keep_prob)
     runner.train(epochs=args.epochs, save_model=os.path.join("model", args.name),
