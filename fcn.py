@@ -146,7 +146,8 @@ class Data:
         return self.images[start:end], self.annotations[start:end]
 
     def get_batch_i(self, i):
-        return self.images[i: i + self.batch_size], self.annotations[i: i + self.batch_size]
+        return self.images[i * self.batch_size: (i + 1) * self.batch_size], \
+               self.annotations[i * self.batch_size: (i + 1) * self.batch_size]
 
     @staticmethod
     def read_scene_image(pickle_path):
@@ -284,7 +285,7 @@ class Runner:
             self.image = tf.placeholder(shape=input_shape, dtype=tf.float32)
             self.label = tf.placeholder(dtype=tf.int32, shape=[self._batch_size, self._image_size, self._image_size, 1])
             self.logits, self.prediction = self._fcn_net(self.image, **kw)
-            entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tf.squeeze(self.label, squeeze_dims=[3]), logits=self.logits)
+            entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tf.squeeze(self.label, axis=[3]), logits=self.logits)
             self.loss = tf.reduce_mean(entropy)
 
             trainable_var = tf.trainable_variables()
@@ -316,17 +317,17 @@ class Runner:
                 if loss < min_loss:
                     break
                 if epoch % test == 0:
-                    self.valid(sess, test_number, epoch, result_path)
+                    self._valid(sess, test_number, epoch, result_path)
                 if epoch % save == 0:
                     self.supervisor.saver.save(sess, os.path.join(save_model, "model_{}".format(epoch)))
                 pass
             Tools.print_info("{}: train end".format(epoch))
-            self.valid(sess, test_number, epoch, result_path)
+            self._valid(sess, test_number, epoch, result_path)
             Tools.print_info("test end")
         pass
 
     # 测试网络
-    def valid(self, sess, test_number, epoch, result_path):
+    def _valid(self, sess, test_number, epoch, result_path):
         Tools.print_info("{} save result".format(epoch))
         for i in range(test_number):
             images, labels = self._valid_data.get_batch_i(i)
@@ -334,17 +335,22 @@ class Runner:
             valid = np.squeeze(labels, axis=3)
             predict = np.squeeze(prediction, axis=3)
             for itr in range(len(images)):
-                old_file = os.path.join(result_path, "{}-{}-old.png".format(epoch, itr))
+                old_file = os.path.join(result_path, "{}-{}-old.png".format(i, itr))
                 if not os.path.exists(old_file):
                     misc.imsave(old_file, images[itr].astype(np.uint8))
 
-                val_file = os.path.join(result_path, "{}-{}-val.png".format(epoch, itr))
+                val_file = os.path.join(result_path, "{}-{}-val.png".format(i, itr))
                 if not os.path.exists(val_file):
                     misc.imsave(val_file, valid[itr].astype(np.uint8))
 
-                pre_file = os.path.join(result_path, "{}-{}-pre.png".format(epoch, itr))
+                pre_file = os.path.join(result_path, "{}-{}-{}-pre.png".format(i, itr, epoch))
                 misc.imsave(pre_file, predict[itr].astype(np.uint8))
                 pass
+        pass
+
+    def valid(self, test_number, info, result_path):
+        with self.supervisor.managed_session() as sess:
+            self._valid(sess, test_number, info, result_path)
         pass
 
     pass
@@ -355,7 +361,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("-name", type=str, default="fcn_vgg_16", help="name")
     parser.add_argument("-epochs", type=int, default=50000, help="train epoch number")
-    parser.add_argument("-batch_size", type=int, default=4, help="batch size")
+    parser.add_argument("-batch_size", type=int, default=8, help="batch size")
     parser.add_argument("-type_number", type=int, default=151, help="type number")
     parser.add_argument("-image_size", type=int, default=224, help="image size")
     parser.add_argument("-image_channel", type=int, default=3, help="image channel")
@@ -387,5 +393,6 @@ if __name__ == '__main__':
     runner.train(epochs=args.epochs, save_model=os.path.join("model", args.name),
                  min_loss=1e-4, print_loss=200, test=1000, test_number=5, save=10000,
                  result_path=Tools.new_dir(os.path.join("result", args.name)))
+    runner.valid(test_number=5, info="valid", result_path=Tools.new_dir(os.path.join("result", args.name)))
 
     pass
