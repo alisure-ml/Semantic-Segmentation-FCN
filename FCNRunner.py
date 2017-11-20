@@ -52,7 +52,7 @@ class Runner:
         return optimizer.apply_gradients(grads)
 
     # 训练网络
-    def train(self, epochs, loss_freq, valid_freq, valid_number, save_freq, result_path):
+    def train(self, epochs, loss_freq, test_freq, valid_freq, valid_number, save_freq, result_path):
         with self.supervisor.managed_session(config=self.config) as sess:
             for epoch in range(epochs):
                 loss = None
@@ -68,6 +68,8 @@ class Runner:
                     Tools.print_info("{}: loss {}".format(epoch, loss))
                 if epoch % valid_freq == 0:
                     self._valid(sess, valid_number, epoch, result_path)
+                if epoch % test_freq == 0:
+                    self._test(sess, info="test")
                 if epoch % save_freq == 0:
                     self.supervisor.saver.save(sess, os.path.join(self._model_path, "model_{}".format(epoch)))
                     pass
@@ -99,6 +101,44 @@ class Runner:
     def valid(self, valid_number, info, result_path):
         with self.supervisor.managed_session() as sess:
             self._valid(sess, valid_number, info, result_path)
+        pass
+
+    # 测试网络
+    def test(self, info):
+        with self.supervisor.managed_session() as sess:
+            self._test(sess, info)
+        pass
+
+    def _test(self, sess, info):
+        Tools.print_info("begin {} test".format(info))
+        now_epochs = self._valid_data.epochs_completed
+
+        test_count = 0
+        test_correct = 0.0
+        while self._valid_data.epochs_completed == now_epochs:
+            images, labels = self._valid_data.next_batch()
+            prediction = sess.run(fetches=self.prediction, feed_dict={self.image: images})
+            labels = np.squeeze(labels, axis=3)
+            predicts = np.squeeze(prediction, axis=3)
+
+            test_count += 1
+            ok_count = 0
+            for index in range(len(images)):
+                now_label = labels[index].astype(np.uint8)
+                now_predict = predicts[index].astype(np.uint8)
+                for x in range(len(now_label)):
+                    for y in range(len(now_label[0])):
+                        if now_label[x][y] == now_predict[x][y]:
+                            ok_count += 1
+                        pass
+                pass
+            test_correct += ok_count / (len(images) * len(images[0]) * len(images[0][0]))
+            pass
+        test_correct /= test_count
+
+        Tools.print_info("------------------------------------")
+        Tools.print_info("      test correct is {}".format(test_correct))
+        Tools.print_info("------------------------------------")
         pass
 
     pass
@@ -138,8 +178,9 @@ if __name__ == '__main__':
     # run
     runner = Runner(train_data=now_train_data, valid_data=now_valid_data, fcn_net=now_net.vgg_19,
                     model_path="model/{}".format(args.name), learning_rate=0.0001, keep_prob=args.keep_prob)
-    runner.train(epochs=args.epochs, loss_freq=1, valid_freq=1, valid_number=5, save_freq=1,
+    runner.train(epochs=args.epochs, loss_freq=1, test_freq=1, valid_freq=1, valid_number=5, save_freq=1,
                  result_path=Tools.new_dir(os.path.join("result", args.name)))
     runner.valid(valid_number=5, info="valid", result_path=Tools.new_dir(os.path.join("result", args.name)))
+    runner.test(info="test")
 
     pass
