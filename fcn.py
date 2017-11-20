@@ -206,7 +206,7 @@ class FCN_VGGNet:
 
     # 网络
     # keep_prob=0.7
-    def vgg_16(self, input_op, **kw):
+    def vgg_19(self, input_op, **kw):
         centered_image = input_op - self._mean_pixel  # mean
 
         with tf.variable_scope("inference"):
@@ -359,7 +359,7 @@ if __name__ == '__main__':
 
     # argument
     parser = argparse.ArgumentParser()
-    parser.add_argument("-name", type=str, default="fcn_vgg_16", help="name")
+    parser.add_argument("-name", type=str, default="fcn_vgg_19", help="name")
     parser.add_argument("-epochs", type=int, default=50000, help="train epoch number")
     parser.add_argument("-batch_size", type=int, default=8, help="batch size")
     parser.add_argument("-type_number", type=int, default=151, help="type number")
@@ -388,7 +388,7 @@ if __name__ == '__main__':
     now_net = FCN_VGGNet(args.type_number, args.image_size, args.image_channel, args.batch_size)
 
     # run
-    runner = Runner(train_data=now_train_data, valid_data=now_valid_data, fcn_net=now_net.vgg_16,
+    runner = Runner(train_data=now_train_data, valid_data=now_valid_data, fcn_net=now_net.vgg_19,
                     model_path="model/{}".format(args.name), learning_rate=0.0001, keep_prob=args.keep_prob)
     runner.train(epochs=args.epochs, save_model=os.path.join("model", args.name),
                  min_loss=1e-4, print_loss=200, test=1000, test_number=5, save=10000,
