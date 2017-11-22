@@ -65,7 +65,7 @@ class Runner:
                     loss, _ = sess.run(fetches=[self.loss, self.train_op], feed_dict={self.image: x, self.label: labels})
                     pass
                 if epoch % loss_freq == 0:
-                    Tools.print_info("{}: loss {}".format(epoch, loss))
+                    Tools.print_info("{} loss {}".format(epoch, loss))
                 if epoch % valid_freq == 0:
                     self._valid(sess, valid_number, epoch, result_path)
                 if epoch % test_freq == 0:
@@ -110,11 +110,10 @@ class Runner:
         pass
 
     def _test(self, sess, info):
-        Tools.print_info("begin {} test".format(info))
-        now_epochs = self._valid_data.epochs_completed
-
         test_count = 0
         test_correct = 0.0
+
+        now_epochs = self._valid_data.epochs_completed
         while self._valid_data.epochs_completed == now_epochs:
             images, labels = self._valid_data.next_batch()
             prediction = sess.run(fetches=self.prediction, feed_dict={self.image: images})
@@ -126,18 +125,14 @@ class Runner:
             for index in range(len(images)):
                 now_label = labels[index].astype(np.uint8)
                 now_predict = predicts[index].astype(np.uint8)
-                for x in range(len(now_label)):
-                    for y in range(len(now_label[0])):
-                        if now_label[x][y] == now_predict[x][y]:
-                            ok_count += 1
-                        pass
+                ok_count += np.sum(np.equal(now_label, now_predict))
                 pass
             test_correct += ok_count / (len(images) * len(images[0]) * len(images[0][0]))
             pass
         test_correct /= test_count
 
         Tools.print_info("------------------------------------")
-        Tools.print_info("      test correct is {}".format(test_correct))
+        Tools.print_info(" test correct is {}".format(test_correct))
         Tools.print_info("------------------------------------")
         pass
 
@@ -148,12 +143,14 @@ if __name__ == '__main__':
     # argument
     parser = argparse.ArgumentParser()
     parser.add_argument("-name", type=str, default="fcn_vgg_19", help="name")
-    parser.add_argument("-epochs", type=int, default=50000, help="train epoch number")
+    parser.add_argument("-epochs", type=int, default=100, help="train epoch number")
     parser.add_argument("-batch_size", type=int, default=8, help="batch size")
     parser.add_argument("-type_number", type=int, default=151, help="type number")
     parser.add_argument("-image_size", type=int, default=224, help="image size")
     parser.add_argument("-image_channel", type=int, default=3, help="image channel")
     parser.add_argument("-keep_prob", type=float, default=0.7, help="keep prob")
+    parser.add_argument("-valid_number", type=int, default=3, help="valid number")
+    parser.add_argument("-is_test", type=int, default=1, help="is test")
     args = parser.parse_args()
 
     # print argument
@@ -167,10 +164,10 @@ if __name__ == '__main__':
     image_options = {'resize': True, 'resize_size': args.image_size}
     now_train_data = Data(batch_size=args.batch_size, type_number=args.type_number,
                           image_size=args.image_size, image_channel=args.image_channel,
-                          records_list=train_records, image_options=image_options)
+                          records_list=train_records, image_options=image_options, shuffle=True, is_test=args.is_test)
     now_valid_data = Data(batch_size=args.batch_size, type_number=args.type_number,
                           image_size=args.image_size, image_channel=args.image_channel,
-                          records_list=valid_records, image_options=image_options)
+                          records_list=valid_records, image_options=image_options, shuffle=False, is_test=args.is_test)
 
     # net
     now_net = FCN_VGGNet(args.type_number, args.image_size, args.image_channel, args.batch_size)
@@ -178,9 +175,10 @@ if __name__ == '__main__':
     # run
     runner = Runner(train_data=now_train_data, valid_data=now_valid_data, fcn_net=now_net.vgg_19,
                     model_path="model/{}".format(args.name), learning_rate=0.0001, keep_prob=args.keep_prob)
-    runner.train(epochs=args.epochs, loss_freq=1, test_freq=1, valid_freq=1, valid_number=5, save_freq=1,
+    runner.train(epochs=args.epochs, loss_freq=1, test_freq=1, valid_freq=1, valid_number=args.valid_number,
+                 save_freq=1, result_path=Tools.new_dir(os.path.join("result", args.name)))
+    runner.valid(valid_number=args.valid_number, info="valid",
                  result_path=Tools.new_dir(os.path.join("result", args.name)))
-    runner.valid(valid_number=5, info="valid", result_path=Tools.new_dir(os.path.join("result", args.name)))
     runner.test(info="test")
 
     pass

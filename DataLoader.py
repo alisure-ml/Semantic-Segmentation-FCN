@@ -65,13 +65,19 @@ class PreData:
 
 class Data:
 
-    def __init__(self, batch_size, type_number, image_size, image_channel, records_list, image_options=None):
+    def __init__(self, batch_size, type_number, image_size, image_channel, records_list,
+                 image_options=None, shuffle=True, is_test=0):
         self.batch_size = batch_size
         self.type_number = type_number
         self.image_size = image_size
         self.image_channel = image_channel
+        self.shuffle = shuffle
+        self.is_test = is_test
 
         self.files = records_list
+        if self.is_test != 0:
+            self.files = self.files[0: 500]
+
         self.image_options = image_options
         self._is_resize = True if self.image_options.get("resize", False) and self.image_options["resize"] else False
         self._resize_size = int(self.image_options["resize_size"]) if self._is_resize else 0
@@ -110,13 +116,13 @@ class Data:
         if self.batch_offset > self.images.shape[0]:
             # Finished epoch
             self.epochs_completed += 1
-            print("****************** Epochs completed: " + str(self.epochs_completed) + "******************")
 
             # Shuffle the data
-            perm = np.arange(self.images.shape[0])
-            np.random.shuffle(perm)
-            self.images = self.images[perm]
-            self.annotations = self.annotations[perm]
+            if self.shuffle:
+                perm = np.arange(self.images.shape[0])
+                np.random.shuffle(perm)
+                self.images = self.images[perm]
+                self.annotations = self.annotations[perm]
 
             # Start next epoch
             start = 0
